@@ -105,7 +105,8 @@ typedef __int64          intmax_t;
 
 #if defined(__clang__) && !defined(FMT_ICC_VERSION)
 # pragma clang diagnostic push
-# pragma clang diagnostic ignored "-Wdocumentation"
+# pragma clang diagnostic ignored "-Wdocumentation-unknown-command"
+# pragma clang diagnostic ignored "-Wpadded"
 #endif
 
 #ifdef __GNUC_LIBSTD__
@@ -228,7 +229,6 @@ typedef __int64          intmax_t;
 # define FMT_ASSERT(condition, message) assert((condition) && message)
 #endif
 
-
 #if FMT_GCC_VERSION >= 400 || FMT_HAS_BUILTIN(__builtin_clz)
 # define FMT_BUILTIN_CLZ(n) __builtin_clz(n)
 #endif
@@ -309,7 +309,7 @@ inline DummyInt _isnan(...) { return DummyInt(); }
 // A helper function to suppress bogus "conditional expression is constant"
 // warnings.
 template <typename T>
-inline T check(T value) { return value; }
+inline T const_check(T value) { return value; }
 }
 }  // namespace fmt
 
@@ -328,8 +328,8 @@ class numeric_limits<fmt::internal::DummyInt> :
     using namespace fmt::internal;
     // The resolution "priority" is:
     // isinf macro > std::isinf > ::isinf > fmt::internal::isinf
-    if (check(sizeof(isinf(x)) == sizeof(bool) ||
-              sizeof(isinf(x)) == sizeof(int))) {
+    if (const_check(sizeof(isinf(x)) == sizeof(bool) ||
+                    sizeof(isinf(x)) == sizeof(int))) {
       return isinf(x) != 0;
     }
     return !_finite(static_cast<double>(x));
@@ -339,8 +339,8 @@ class numeric_limits<fmt::internal::DummyInt> :
   template <typename T>
   static bool isnotanumber(T x) {
     using namespace fmt::internal;
-    if (check(sizeof(isnan(x)) == sizeof(bool) ||
-              sizeof(isnan(x)) == sizeof(int))) {
+    if (const_check(sizeof(isnan(x)) == sizeof(bool) ||
+                    sizeof(isnan(x)) == sizeof(int))) {
       return isnan(x) != 0;
     }
     return _isnan(static_cast<double>(x)) != 0;
@@ -349,7 +349,7 @@ class numeric_limits<fmt::internal::DummyInt> :
   // Portable version of signbit.
   static bool isnegative(double x) {
     using namespace fmt::internal;
-    if (check(sizeof(signbit(x)) == sizeof(int)))
+    if (const_check(sizeof(signbit(x)) == sizeof(int)))
       return signbit(x) != 0;
     if (x < 0) return true;
     if (!isnotanumber(x)) return false;
@@ -531,13 +531,12 @@ class BasicCStringRef {
 typedef BasicCStringRef<char> CStringRef;
 typedef BasicCStringRef<wchar_t> WCStringRef;
 
-/**
-  A formatting error such as invalid format string.
-*/
+/** A formatting error such as invalid format string. */
 class FormatError : public std::runtime_error {
  public:
   explicit FormatError(CStringRef message)
   : std::runtime_error(message.c_str()) {}
+  ~FormatError() throw();
 };
 
 namespace internal {
@@ -663,8 +662,8 @@ void Buffer<T>::append(const U *begin, const U *end) {
 
 namespace internal {
 
-// A memory buffer for trivially copyable/constructible types with the first SIZE
-// elements stored in the object itself.
+// A memory buffer for trivially copyable/constructible types with the first
+// SIZE elements stored in the object itself.
 template <typename T, std::size_t SIZE, typename Allocator = std::allocator<T> >
 class MemoryBuffer : private Allocator, public Buffer<T> {
  private:
@@ -842,7 +841,7 @@ struct FMT_API BasicData {
 # define FMT_USE_EXTERN_TEMPLATES (__clang__ && FMT_USE_VARIADIC_TEMPLATES)
 #endif
 
-#if FMT_USE_EXTERN_TEMPLATES
+#if FMT_USE_EXTERN_TEMPLATES && !defined(FMT_HEADER_ONLY)
 extern template struct BasicData<void>;
 #endif
 
@@ -934,6 +933,7 @@ inline void format_decimal(Char *buffer, UInt value, unsigned num_digits,
   }
   unsigned index = static_cast<unsigned>(value * 2);
   *--buffer = Data::DIGITS[index + 1];
+  thousands_sep(buffer);
   *--buffer = Data::DIGITS[index];
 }
 
@@ -1200,7 +1200,7 @@ class MakeValue : public Arg {
   MakeValue(long value) {
     // To minimize the number of types we need to deal with, long is
     // translated either to int or to long long depending on its size.
-    if (check(sizeof(long) == sizeof(int)))
+    if (const_check(sizeof(long) == sizeof(int)))
       int_value = static_cast<int>(value);
     else
       long_long_value = value;
@@ -1210,7 +1210,7 @@ class MakeValue : public Arg {
   }
 
   MakeValue(unsigned long value) {
-    if (check(sizeof(unsigned long) == sizeof(unsigned)))
+    if (const_check(sizeof(unsigned long) == sizeof(unsigned)))
       uint_value = static_cast<unsigned>(value);
     else
       ulong_long_value = value;
@@ -1316,10 +1316,11 @@ struct NamedArg : Arg {
 class RuntimeError : public std::runtime_error {
  protected:
   RuntimeError() : std::runtime_error("") {}
+  ~RuntimeError() throw();
 };
 
-template <typename Char>
-class PrintfArgFormatter;
+template <typename Impl, typename Char>
+class BasicPrintfArgFormatter;
 
 template <typename Char>
 class ArgMap;
@@ -1515,9 +1516,10 @@ class ArgVisitor {
    */
   Result visit(const Arg &arg) {
     switch (arg.type) {
-    default:
+    case Arg::NONE:
+    case Arg::NAMED_ARG:
       FMT_ASSERT(false, "invalid argument type");
-      return Result();
+      break;
     case Arg::INT:
       return FMT_DISPATCH(visit_int(arg.int_value));
     case Arg::UINT:
@@ -1545,6 +1547,7 @@ class ArgVisitor {
     case Arg::CUSTOM:
       return FMT_DISPATCH(visit_custom(arg.custom));
     }
+    return Result();
   }
 };
 
@@ -1858,7 +1861,7 @@ class ArgFormatterBase : public ArgVisitor<Impl, void> {
         out += spec_.width_ - CHAR_WIDTH;
       } else if (spec_.align_ == ALIGN_CENTER) {
         out = writer_.fill_padding(out, spec_.width_,
-                                   internal::check(CHAR_WIDTH), fill);
+                                   internal::const_check(CHAR_WIDTH), fill);
       } else {
         std::uninitialized_fill_n(out + CHAR_WIDTH,
                                   spec_.width_ - CHAR_WIDTH, fill);
@@ -1936,26 +1939,6 @@ class FormatterBase {
     if (start != end)
       w << BasicStringRef<Char>(start, internal::to_unsigned(end - start));
   }
-};
-
-// A printf formatter.
-template <typename Char>
-class PrintfFormatter : private FormatterBase {
- private:
-  void parse_flags(FormatSpec &spec, const Char *&s);
-
-  // Returns the argument with specified index or, if arg_index is equal
-  // to the maximum unsigned value, the next argument.
-  Arg get_arg(const Char *s,
-      unsigned arg_index = (std::numeric_limits<unsigned>::max)());
-
-  // Parses argument index, flags and width and returns the argument index.
-  unsigned parse_header(const Char *&s, FormatSpec &spec);
-
- public:
-  explicit PrintfFormatter(const ArgList &args) : FormatterBase(args) {}
-  FMT_API void format(BasicWriter<Char> &writer,
-                      BasicCStringRef<Char> format_str);
 };
 }  // namespace internal
 
@@ -2279,6 +2262,8 @@ class SystemError : public internal::RuntimeError {
   }
   FMT_VARIADIC_CTOR(SystemError, init, int, CStringRef)
 
+  ~SystemError() throw();
+
   int error_code() const { return error_code_; }
 };
 
@@ -2420,7 +2405,8 @@ class BasicWriter {
   template <typename Impl, typename Char_>
   friend class internal::ArgFormatterBase;
 
-  friend class internal::PrintfArgFormatter<Char>;
+  template <typename Impl, typename Char_>
+  friend class internal::BasicPrintfArgFormatter;
 
  protected:
   /**
@@ -2795,7 +2781,7 @@ void BasicWriter<Char>::write_int(T value, Spec spec) {
     unsigned num_digits = internal::count_digits(abs_value);
     fmt::StringRef sep = internal::thousands_sep(std::localeconv());
     unsigned size = static_cast<unsigned>(
-          num_digits + sep.size() * (num_digits - 1) / 3);
+          num_digits + sep.size() * ((num_digits - 1) / 3));
     CharPtr p = prepare_int_buffer(size, spec, prefix, prefix_size) + 1;
     internal::format_decimal(get(p), abs_value, 0, internal::ThousandsSep(sep));
     break;
@@ -3187,56 +3173,6 @@ FMT_API void print(std::FILE *f, CStringRef format_str, ArgList args);
  */
 FMT_API void print(CStringRef format_str, ArgList args);
 
-template <typename Char>
-void printf(BasicWriter<Char> &w, BasicCStringRef<Char> format, ArgList args) {
-  internal::PrintfFormatter<Char>(args).format(w, format);
-}
-
-/**
-  \rst
-  Formats arguments and returns the result as a string.
-
-  **Example**::
-
-    std::string message = fmt::sprintf("The answer is %d", 42);
-  \endrst
-*/
-inline std::string sprintf(CStringRef format, ArgList args) {
-  MemoryWriter w;
-  printf(w, format, args);
-  return w.str();
-}
-
-inline std::wstring sprintf(WCStringRef format, ArgList args) {
-  WMemoryWriter w;
-  printf(w, format, args);
-  return w.str();
-}
-
-/**
-  \rst
-  Prints formatted data to the file *f*.
-
-  **Example**::
-
-    fmt::fprintf(stderr, "Don't %s!", "panic");
-  \endrst
- */
-FMT_API int fprintf(std::FILE *f, CStringRef format, ArgList args);
-
-/**
-  \rst
-  Prints formatted data to ``stdout``.
-
-  **Example**::
-
-    fmt::printf("Elapsed time: %.2f seconds", 1.23);
-  \endrst
- */
-inline int printf(CStringRef format, ArgList args) {
-  return fprintf(stdout, format, args);
-}
-
 /**
   Fast integer formatter.
  */
@@ -3502,12 +3438,7 @@ FMT_VARIADIC(std::string, format, CStringRef)
 FMT_VARIADIC_W(std::wstring, format, WCStringRef)
 FMT_VARIADIC(void, print, CStringRef)
 FMT_VARIADIC(void, print, std::FILE *, CStringRef)
-
 FMT_VARIADIC(void, print_colored, Color, CStringRef)
-FMT_VARIADIC(std::string, sprintf, CStringRef)
-FMT_VARIADIC_W(std::wstring, sprintf, WCStringRef)
-FMT_VARIADIC(int, printf, CStringRef)
-FMT_VARIADIC(int, fprintf, std::FILE *, CStringRef)
 
 namespace internal {
 template <typename Char>

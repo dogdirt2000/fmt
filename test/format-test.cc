@@ -933,7 +933,7 @@ TEST(FormatterTest, RuntimeWidth) {
       FormatError, "number is too big");
   EXPECT_THROW_MSG(format("{0:{1}}", 0, -1l),
       FormatError, "negative width");
-  if (fmt::internal::check(sizeof(long) > sizeof(int))) {
+  if (fmt::internal::const_check(sizeof(long) > sizeof(int))) {
     long value = INT_MAX;
     EXPECT_THROW_MSG(format("{0:{1}}", 0, (value + 1)),
         FormatError, "number is too big");
@@ -1052,7 +1052,7 @@ TEST(FormatterTest, RuntimePrecision) {
       FormatError, "number is too big");
   EXPECT_THROW_MSG(format("{0:.{1}}", 0, -1l),
       FormatError, "negative precision");
-  if (fmt::internal::check(sizeof(long) > sizeof(int))) {
+  if (fmt::internal::const_check(sizeof(long) > sizeof(int))) {
     long value = INT_MAX;
     EXPECT_THROW_MSG(format("{0:.{1}}", 0, (value + 1)),
         FormatError, "number is too big");
@@ -1229,7 +1229,9 @@ TEST(FormatterTest, FormatIntLocale) {
   lconv lc = {};
   char sep[] = "--";
   lc.thousands_sep = sep;
-  EXPECT_CALL(mock, localeconv()).WillOnce(testing::Return(&lc));
+  EXPECT_CALL(mock, localeconv()).Times(3).WillRepeatedly(testing::Return(&lc));
+  EXPECT_EQ("123", format("{:n}", 123));
+  EXPECT_EQ("1--234", format("{:n}", 1234));
   EXPECT_EQ("1--234--567", format("{:n}", 1234567));
 }
 

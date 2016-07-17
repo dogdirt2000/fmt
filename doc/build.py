@@ -20,7 +20,7 @@ def pip_install(package, commit=None, **kwargs):
       pass
   if commit:
     package = 'git+git://github.com/{0}.git@{1}'.format(package, commit)
-  print('Installing {}'.format(package))
+  print('Installing {0}'.format(package))
   check_call(['pip', 'install', package])
 
 def create_build_env(dirname='virtualenv'):
@@ -72,7 +72,7 @@ def build_docs(version='dev', **kwargs):
       GENERATE_MAN      = NO
       GENERATE_RTF      = NO
       CASE_SENSE_NAMES  = NO
-      INPUT             = {0}/format.h {0}/ostream.h {0}/string.h
+      INPUT             = {0}/format.h {0}/ostream.h {0}/printf.h {0}/string.h
       QUIET             = YES
       JAVADOC_AUTOBRIEF = YES
       AUTOLINK_SUPPORT  = NO
@@ -92,12 +92,14 @@ def build_docs(version='dev', **kwargs):
   if p.returncode != 0:
     raise CalledProcessError(p.returncode, cmd)
   html_dir = os.path.join(work_dir, 'html')
+  versions = ['3.0.0', '2.0.0', '1.1.0']
   check_call(['sphinx-build',
-              '-Dbreathe_projects.format=' + doxyxml_dir,
+              '-Dbreathe_projects.format=' + os.path.abspath(doxyxml_dir),
               '-Dversion=' + version, '-Drelease=' + version,
-              '-Aversion=' + version, '-b', 'html', doc_dir, html_dir])
+              '-Aversion=' + version, '-Aversions=' + ','.join(versions),
+              '-b', 'html', doc_dir, html_dir])
   try:
-    check_call(['lessc', #'--clean-css',
+    check_call(['lessc', '--clean-css',
                 '--include-path=' + os.path.join(doc_dir, 'bootstrap'),
                 os.path.join(doc_dir, 'fmt.less'),
                 os.path.join(html_dir, '_static', 'fmt.css')])
